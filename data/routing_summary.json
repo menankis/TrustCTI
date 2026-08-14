@@ -1,0 +1,13 @@
+{
+  "total_alerts": 1000,
+  "auto_escalated": 105,
+  "auto_closed": 548,
+  "sent_to_human_review": 347,
+  "pct_requiring_human_review": 34.7,
+  "thresholds": {
+    "high": 0.75,
+    "low": 0.15
+  },
+  "auto_escalate_accuracy": 0.848,
+  "auto_close_accuracy": 1.0
+}

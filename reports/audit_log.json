@@ -1,0 +1,26 @@
+{
+  "audit_generated_at_utc": "2026-08-14T06:47:50.385512+00:00",
+  "model_version_hash": "bda3915925d1ea45",
+  "total_decisions_logged": 1000,
+  "routing_breakdown": {
+    "auto_close": 548,
+    "human_review": 347,
+    "auto_escalate": 105
+  },
+  "human_review_rate_pct": 34.7,
+  "adversarial_robustness_summary": {
+    "evasion_rate": 0.103,
+    "recall_at_10pct_poisoning": 0.913
+  },
+  "drift_status": {
+    "latest_period_checked": "Month 6",
+    "latest_recall": 0.502,
+    "retrain_threshold": 0.75,
+    "retrain_recommended": true
+  },
+  "accountability": {
+    "model_owner": "cybersecurity_ai_team",
+    "approval_required_for_high_impact_actions": true,
+    "rollback_procedure": "Revert to previous model_version_hash in models/ registry and re-run routing on the last 24h of traffic before resuming auto-decisions."
+  }
+}

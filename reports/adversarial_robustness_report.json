@@ -1,0 +1,46 @@
+{
+  "evasion_attack": {
+    "malicious_samples_tested": 136,
+    "samples_that_evaded_after_perturbation": 14,
+    "evasion_rate": 0.103,
+    "avg_threat_score_before": 0.798,
+    "avg_threat_score_after": 0.748,
+    "perturbed_features": [
+      "login_attempts_last_hour",
+      "data_transfer_mb",
+      "unusual_time_access",
+      "protocol_risk_score"
+    ],
+    "perturbation_magnitude": 0.3
+  },
+  "poisoning_attack": [
+    {
+      "poison_fraction": 0.0,
+      "n_labels_flipped": 0,
+      "accuracy": 0.894,
+      "recall_malicious": 0.907,
+      "precision_malicious": 0.596
+    },
+    {
+      "poison_fraction": 0.02,
+      "n_labels_flipped": 80,
+      "accuracy": 0.886,
+      "recall_malicious": 0.893,
+      "precision_malicious": 0.578
+    },
+    {
+      "poison_fraction": 0.05,
+      "n_labels_flipped": 200,
+      "accuracy": 0.881,
+      "recall_malicious": 0.92,
+      "precision_malicious": 0.563
+    },
+    {
+      "poison_fraction": 0.1,
+      "n_labels_flipped": 400,
+      "accuracy": 0.857,
+      "recall_malicious": 0.913,
+      "precision_malicious": 0.513
+    }
+  ]
+}

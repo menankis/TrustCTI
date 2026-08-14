@@ -1,0 +1,34 @@
+[
+  {
+    "period": "Month 0 (deployment)",
+    "drift_level": 0.0,
+    "accuracy": 0.901,
+    "recall_malicious": 0.893,
+    "precision_malicious": 0.617,
+    "f1_malicious": 0.73
+  },
+  {
+    "period": "Month 2",
+    "drift_level": 0.35,
+    "accuracy": 0.91,
+    "recall_malicious": 0.858,
+    "precision_malicious": 0.652,
+    "f1_malicious": 0.741
+  },
+  {
+    "period": "Month 4",
+    "drift_level": 0.65,
+    "accuracy": 0.915,
+    "recall_malicious": 0.64,
+    "precision_malicious": 0.754,
+    "f1_malicious": 0.692
+  },
+  {
+    "period": "Month 6",
+    "drift_level": 1.0,
+    "accuracy": 0.903,
+    "recall_malicious": 0.502,
+    "precision_malicious": 0.774,
+    "f1_malicious": 0.609
+  }
+]
