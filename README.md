@@ -37,19 +37,6 @@ python3 run_pipeline.py
 Or run any stage individually (each stage reads the previous stage's output
 from `data/`, `models/`, or `reports/`).
 
-## Key results from this run
-
-- **90.7% accuracy, 86.7% recall** on malicious events at deployment
-- **33.6%** of alerts are routed to human review; the rest are auto-decided
-  with **100% auto-close accuracy** and **84.2% auto-escalate accuracy**
-- **10.8% evasion rate** under a simple feature-perturbation attack
-- **Accuracy stays flat (~90%) over 6 simulated months while recall on real
-  threats collapses from 83.6% to 43.6%** as attacker behavior shifts — proof
-  that accuracy alone is a misleading health metric, and why the drift monitor
-  exists
-- Every decision is logged with a model version hash, explanation, and
-  routing outcome for audit purposes
-
 ## Why this design
 
 Each stage maps directly to a barrier or safeguard identified in the source
