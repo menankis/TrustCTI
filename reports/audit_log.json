@@ -1,20 +1,20 @@
 {
-  "audit_generated_at_utc": "2026-08-14T06:47:50.385512+00:00",
-  "model_version_hash": "bda3915925d1ea45",
-  "total_decisions_logged": 1000,
+  "audit_generated_at_utc": "2026-08-17T06:54:05.903201+00:00",
+  "model_version_hash": "cd69f531da6dd6a9",
+  "total_decisions_logged": 9322,
   "routing_breakdown": {
-    "auto_close": 548,
-    "human_review": 347,
-    "auto_escalate": 105
+    "auto_close": 4665,
+    "auto_escalate": 4239,
+    "human_review": 418
   },
-  "human_review_rate_pct": 34.7,
+  "human_review_rate_pct": 4.5,
   "adversarial_robustness_summary": {
-    "evasion_rate": 0.103,
-    "recall_at_10pct_poisoning": 0.913
+    "evasion_rate_at_full_intensity": 1.0,
+    "recall_at_10pct_poisoning": 0.989
   },
   "drift_status": {
     "latest_period_checked": "Month 6",
-    "latest_recall": 0.502,
+    "latest_recall": 0.0,
     "retrain_threshold": 0.75,
     "retrain_recommended": true
   },

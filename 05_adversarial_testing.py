@@ -1,18 +1,20 @@
 """
-Stage 5: Adversarial Robustness Testing
+Stage 5 (adapted): Adversarial Robustness Testing — CICIDS2017 schema
 -----------------------------------------
-Addresses the paper's finding that AI systems are themselves attackable
-(35.7% of practitioners had directly encountered adversarial AI threats).
-Two attack simulations:
+Two attacks: evasion and data poisoning.
 
-1. Evasion attack: take malicious events the model correctly caught,
-   nudge the most influential feature just enough to see if the model
-   flips its decision to "benign" — this simulates an attacker who knows
-   roughly what the model looks at and tunes their behavior to slip under it.
+IMPORTANT FIX: an earlier version of the evasion test scaled a fixed list
+of features down by a fixed 30% — this produced a near-zero (0.5%) evasion
+rate on real CICIDS2017 data, which was misleading rather than reassuring.
+The problem: real feature values span huge ranges (Flow Bytes/s in the
+millions, packet totals in the thousands), so a flat 30% cut barely moves
+a flow's fingerprint. This mirrors the exact issue Stage 6's drift test had
+before being fixed.
 
-2. Data poisoning simulation: inject a small number of mislabeled training
-   examples and see how much detection performance degrades — this
-   simulates an attacker who can influence training/feedback data.
+Fix: same approach as the corrected Stage 6 — use the model's actual
+feature_importances_ to find what it relies on, then INTERPOLATE malicious
+flows toward real benign averages on those features, at several intensity
+levels, instead of a single fixed percentage cut.
 
 Output: reports/adversarial_robustness_report.json
 """
@@ -30,40 +32,35 @@ MODEL_PATH = "models/threat_model.pkl"
 DATA_PATH = "data/threat_data_processed.csv"
 REPORT_PATH = "reports/adversarial_robustness_report.json"
 RANDOM_SEED = 42
-
-# Features an attacker could realistically manipulate (vs. ones they can't,
-# like "prior_incident_count" which reflects historical record, not live behavior)
-MANIPULABLE_FEATURES = [
-    "login_attempts_last_hour",
-    "data_transfer_mb",
-    "unusual_time_access",
-    "protocol_risk_score",
-]
+TOP_N_FEATURES_TO_ATTACK = 10
+INTENSITY_LEVELS = (0.25, 0.5, 0.75, 1.0)
 
 
-def evasion_attack_test(model, X_test, y_test, feature_names, perturb_pct=0.3):
+def get_top_features(model, feature_names, top_n):
+    importances = pd.Series(model.feature_importances_, index=feature_names)
+    return importances.sort_values(ascending=False).head(top_n).index.tolist()
+
+
+def evasion_attack_test(model, X_test, y_test, target_features, benign_reference, intensity):
     """
-    For correctly-detected malicious events, perturb manipulable features
-    by perturb_pct and check how many predictions flip to 'benign'.
+    Blend correctly-caught malicious flows toward real benign averages on
+    the model's top features, at the given intensity (0=no change,
+    1=fully replaced with benign averages), and check how many flip.
     """
     malicious_mask = (y_test == 1)
     correctly_caught = malicious_mask & (model.predict(X_test) == 1)
-    X_malicious = X_test[correctly_caught].copy()
+    X_malicious = X_test[correctly_caught].astype(float).copy()
 
     if len(X_malicious) == 0:
         return {"error": "no correctly-caught malicious samples to test"}
 
     original_preds = model.predict(X_malicious)
-    X_perturbed = X_malicious.copy()
+    original_scores = model.predict_proba(X_malicious)[:, 1]
 
-    for feat in MANIPULABLE_FEATURES:
-        if feat in X_perturbed.columns:
-            if feat in ["unusual_time_access"]:
-                # binary feature: flip it
-                X_perturbed[feat] = 1 - X_perturbed[feat]
-            else:
-                # reduce numeric "suspicious-looking" features
-                X_perturbed[feat] = X_perturbed[feat] * (1 - perturb_pct)
+    X_perturbed = X_malicious.copy()
+    for feat in target_features:
+        target_val = benign_reference[feat]
+        X_perturbed[feat] = X_perturbed[feat] * (1 - intensity) + target_val * intensity
 
     perturbed_preds = model.predict(X_perturbed)
     perturbed_scores = model.predict_proba(X_perturbed)[:, 1]
@@ -72,21 +69,17 @@ def evasion_attack_test(model, X_test, y_test, feature_names, perturb_pct=0.3):
     evasion_rate = n_evaded / len(X_malicious)
 
     return {
+        "intensity": intensity,
         "malicious_samples_tested": int(len(X_malicious)),
-        "samples_that_evaded_after_perturbation": n_evaded,
+        "samples_that_evaded": n_evaded,
         "evasion_rate": round(evasion_rate, 3),
-        "avg_threat_score_before": round(float(model.predict_proba(X_malicious)[:, 1].mean()), 3),
+        "avg_threat_score_before": round(float(original_scores.mean()), 3),
         "avg_threat_score_after": round(float(perturbed_scores.mean()), 3),
-        "perturbed_features": MANIPULABLE_FEATURES,
-        "perturbation_magnitude": perturb_pct,
     }
 
 
 def poisoning_attack_test(X_train, y_train, X_test, y_test, poison_fractions=(0.0, 0.02, 0.05, 0.10)):
-    """
-    Flip labels on an increasing fraction of training data (label poisoning)
-    and measure how much detection recall degrades.
-    """
+    """Unchanged — this logic doesn't depend on feature scale."""
     results = []
     rng = np.random.RandomState(RANDOM_SEED)
 
@@ -95,7 +88,7 @@ def poisoning_attack_test(X_train, y_train, X_test, y_test, poison_fractions=(0.
         n_poison = int(frac * len(y_train))
         if n_poison > 0:
             poison_idx = rng.choice(y_train.index, size=n_poison, replace=False)
-            y_poisoned.loc[poison_idx] = 1 - y_poisoned.loc[poison_idx]  # flip label
+            y_poisoned.loc[poison_idx] = 1 - y_poisoned.loc[poison_idx]
 
         model = RandomForestClassifier(
             n_estimators=200, max_depth=8, min_samples_leaf=5,
@@ -126,17 +119,28 @@ if __name__ == "__main__":
         X, y, test_size=0.2, stratify=y, random_state=RANDOM_SEED
     )
 
-    print("=== Running evasion attack test ===")
-    evasion_results = evasion_attack_test(model, X_test, y_test, X.columns)
-    print(json.dumps(evasion_results, indent=2))
+    target_features = get_top_features(model, X.columns, TOP_N_FEATURES_TO_ATTACK)
+    benign_reference = X_test[y_test == 0][target_features].mean()
 
-    print("\n=== Running data poisoning test (this retrains the model 4x, may take a moment) ===")
+    print(f"Targeting the model's top {TOP_N_FEATURES_TO_ATTACK} features for evasion testing:")
+    for feat in target_features:
+        print(f"  - {feat} (benign avg: {benign_reference[feat]:.2f})")
+
+    print("\n=== Running evasion attack test at multiple intensities ===")
+    evasion_results = []
+    for intensity in INTENSITY_LEVELS:
+        result = evasion_attack_test(model, X_test, y_test, target_features, benign_reference, intensity)
+        evasion_results.append(result)
+        print(result)
+
+    print("\n=== Running data poisoning test (retrains the model 4x) ===")
     poisoning_results = poisoning_attack_test(X_train, y_train, X_test, y_test)
     for r in poisoning_results:
         print(r)
 
     report = {
-        "evasion_attack": evasion_results,
+        "target_features": target_features,
+        "evasion_attack_by_intensity": evasion_results,
         "poisoning_attack": poisoning_results,
     }
     with open(REPORT_PATH, "w") as f:

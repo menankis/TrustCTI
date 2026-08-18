@@ -1,124 +1,120 @@
 """
-Stage 1: Data Ingestion & Normalization
+Stage 1 (adapted): Data Ingestion for CICIDS2017
 -----------------------------------------
-Simulates pulling threat-related events from multiple fragmented sources
-(login systems, network logs, endpoint tools) — exactly the "fragmented,
-inconsistent data" problem the CODASPY 2026 paper identifies as the
-#1 technical barrier (78.6% of practitioners called it major/significant).
+Replaces the synthetic generator with the real Clean_CICIDS2017.csv file.
+Everything from Stage 2 onward is unchanged and doesn't care that the data
+is now real instead of synthetic — it just needs numeric features + a
+binary 'label' column, which is exactly what this produces.
 
-We deliberately inject messiness (missing values, inconsistent scales,
-duplicate rows) and then clean it — because a real ingestion layer's job
-is to fix that, not assume clean data.
+Run this in the SAME folder as Clean_CICIDS2017.csv.
 
-Output: data/threat_data_processed.csv
+    python3 01_data_ingestion.py
 """
 
-import numpy as np
 import pandas as pd
+import numpy as np
 import os
 
-RANDOM_SEED = 42
-N_SAMPLES = 5000
+CSV_PATH = r"C:\Users\Menanki Shekhawat\TrustCTI\Clean_CICIDS2017.csv"   # change path if needed
 OUTPUT_DIR = "data"
+RANDOM_SEED = 42
 
-np.random.seed(RANDOM_SEED)
+# The full file has ~2.8 million rows and 78 raw features. We do two things
+# to keep this workable and interpretable for a demo pipeline:
+#   1. Select a focused, human-readable subset of features (not all 78) so
+#      Stage 3's SHAP explanations stay readable ("SYN flag count increased
+#      risk" is meaningful; "Fwd IAT Std" is not, to a non-expert analyst).
+#   2. Cap rows per class so training/SHAP/adversarial testing stay fast.
+SELECTED_FEATURES = [
+    "Destination Port",
+    "Flow Duration",
+    "Total Fwd Packets",
+    "Total Backward Packets",
+    "Total Length of Fwd Packets",
+    "Total Length of Bwd Packets",
+    "Flow Bytes/s",
+    "Flow Packets/s",
+    "Fwd Packet Length Mean",
+    "Bwd Packet Length Mean",
+    "Flow IAT Mean",
+    "SYN Flag Count",
+    "ACK Flag Count",
+    "PSH Flag Count",
+    "Average Packet Size",
+    "Init_Win_bytes_forward",
+    "Init_Win_bytes_backward",
+    "Active Mean",
+    "Idle Mean",
+]
+
+LABEL_COL = "Label"
+MAX_ROWS_PER_CLASS = 25000  # increase/decrease depending on your machine's RAM
 
 
-def generate_raw_events(n_samples: int) -> pd.DataFrame:
-    """Simulate raw, messy CTI event data from multiple sources."""
+def load_and_sample(csv_path: str, max_rows_per_class: int) -> pd.DataFrame:
+    print("Reading CSV (the full file may take a minute or two)...")
+    usecols = SELECTED_FEATURES + [LABEL_COL]
+    df = pd.read_csv(csv_path, usecols=usecols)
+    print(f"Loaded {len(df):,} rows")
 
-    src_ip_reputation = np.random.normal(70, 20, n_samples).clip(0, 100)
-    login_attempts_last_hour = np.random.poisson(2, n_samples)
-    geo_mismatch = np.random.binomial(1, 0.08, n_samples)
-    unusual_time_access = np.random.binomial(1, 0.15, n_samples)
-    data_transfer_mb = np.random.exponential(50, n_samples)
-    known_malicious_indicators = np.random.poisson(0.3, n_samples)
-    days_since_last_patch = np.random.exponential(20, n_samples)
-    protocol_risk_score = np.random.normal(30, 15, n_samples).clip(0, 100)
-    user_privilege_level = np.random.randint(1, 6, n_samples)
-    prior_incident_count = np.random.poisson(0.5, n_samples)
+    # Binary label: BENIGN -> 0, every attack type (DDoS, PortScan, etc.) -> 1
+    df["label"] = (df[LABEL_COL] != "BENIGN").astype(int)
 
-    # ---- Ground-truth label logic (a weighted "risk function" + noise) ----
-    risk_score = (
-        (100 - src_ip_reputation) * 0.02
-        + login_attempts_last_hour * 0.15
-        + geo_mismatch * 2.5
-        + unusual_time_access * 1.2
-        + (data_transfer_mb > 150).astype(int) * 1.5
-        + known_malicious_indicators * 2.0
-        + (days_since_last_patch > 45).astype(int) * 1.0
-        + protocol_risk_score * 0.02
-        + prior_incident_count * 1.3
-        + np.random.normal(0, 0.8, n_samples)  # noise so it's not trivially separable
-    )
-    threshold = np.percentile(risk_score, 85)  # ~15% malicious, realistic imbalance
-    label = (risk_score > threshold).astype(int)
+    print("\nOriginal label breakdown (attack types collapse into 'malicious'):")
+    print(df[LABEL_COL].value_counts())
 
-    df = pd.DataFrame({
-        "src_ip_reputation_score": src_ip_reputation,
-        "login_attempts_last_hour": login_attempts_last_hour,
-        "geo_mismatch": geo_mismatch,
-        "unusual_time_access": unusual_time_access,
-        "data_transfer_mb": data_transfer_mb,
-        "known_malicious_indicator_count": known_malicious_indicators,
-        "days_since_last_patch": days_since_last_patch,
-        "protocol_risk_score": protocol_risk_score,
-        "user_privilege_level": user_privilege_level,
-        "prior_incident_count": prior_incident_count,
-        "label": label,
-    })
+    # Stratified cap: sample up to max_rows_per_class from EACH class
+    # (benign / malicious) so rare attack types aren't drowned out, but the
+    # dataset stays a manageable size. Done with explicit per-class
+    # filtering rather than groupby().apply(), which has an edge case that
+    # can silently drop the grouping column when only one class is present
+    # in a given slice of data.
+    sampled_parts = []
+    for cls_value in sorted(df["label"].unique()):
+        subset = df[df["label"] == cls_value]
+        n = min(len(subset), max_rows_per_class)
+        sampled_parts.append(subset.sample(n, random_state=RANDOM_SEED))
 
-    # ---- Inject real-world messiness (this is the "fragmented data" problem) ----
-    # 1. Missing values scattered across a few columns
-    for col in ["src_ip_reputation_score", "data_transfer_mb", "days_since_last_patch"]:
-        missing_idx = np.random.choice(df.index, size=int(0.03 * n_samples), replace=False)
-        df.loc[missing_idx, col] = np.nan
+    sampled = pd.concat(sampled_parts, ignore_index=True)
+    sampled = sampled.drop(columns=[LABEL_COL]).reset_index(drop=True)
 
-    # 2. Duplicate rows (common when multiple tools log the same event)
-    dupes = df.sample(frac=0.02, random_state=RANDOM_SEED)
-    df = pd.concat([df, dupes], ignore_index=True)
-
-    return df
+    print(f"\nSampled dataset shape: {sampled.shape}")
+    print("Label distribution after sampling:")
+    print(sampled["label"].value_counts(normalize=True))
+    return sampled
 
 
 def clean_and_normalize(df: pd.DataFrame) -> pd.DataFrame:
-    """This is the actual 'ingestion & normalization' logic a pipeline needs."""
+    feature_cols = [c for c in df.columns if c != "label"]
+
+    # CICIDS2017 is known to contain +/- infinity in rate columns (e.g.
+    # Flow Bytes/s when Flow Duration is 0 -> division by zero). Convert
+    # those to NaN so they get handled like any other missing value,
+    # instead of silently poisoning the model with inf.
+    n_inf = np.isinf(df[feature_cols]).sum().sum()
+    df[feature_cols] = df[feature_cols].replace([np.inf, -np.inf], np.nan)
+    print(f"\nReplaced {n_inf} infinite values with NaN")
+
+    n_missing = df[feature_cols].isna().sum().sum()
+    for col in feature_cols:
+        if df[col].isna().sum() > 0:
+            df[col] = df[col].fillna(df[col].median())
+    print(f"Imputed {n_missing} missing/converted values with column medians")
 
     before = len(df)
-    df = df.drop_duplicates()
+    df = df.drop_duplicates().reset_index(drop=True)
     print(f"Removed {before - len(df)} duplicate rows")
 
-    # Impute missing numeric values with column median (robust to outliers)
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.drop("label")
-    for col in numeric_cols:
-        n_missing = df[col].isna().sum()
-        if n_missing > 0:
-            df[col] = df[col].fillna(df[col].median())
-            print(f"Imputed {n_missing} missing values in '{col}' with median")
-
-    # Clip obviously invalid values (e.g. negative reputation scores)
-    df["src_ip_reputation_score"] = df["src_ip_reputation_score"].clip(0, 100)
-    df["protocol_risk_score"] = df["protocol_risk_score"].clip(0, 100)
-    df["days_since_last_patch"] = df["days_since_last_patch"].clip(0, None)
-    df["data_transfer_mb"] = df["data_transfer_mb"].clip(0, None)
-
-    df = df.reset_index(drop=True)
     return df
 
 
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print("Generating raw multi-source threat event data...")
-    raw_df = generate_raw_events(N_SAMPLES)
-    print(f"Raw dataset shape: {raw_df.shape}")
-    print(f"Missing values:\n{raw_df.isna().sum()[raw_df.isna().sum() > 0]}\n")
-
-    print("Cleaning and normalizing...")
-    clean_df = clean_and_normalize(raw_df)
-    print(f"\nFinal dataset shape: {clean_df.shape}")
-    print(f"Label distribution:\n{clean_df['label'].value_counts(normalize=True)}")
+    df = load_and_sample(CSV_PATH, MAX_ROWS_PER_CLASS)
+    df = clean_and_normalize(df)
 
     out_path = os.path.join(OUTPUT_DIR, "threat_data_processed.csv")
-    clean_df.to_csv(out_path, index=False)
+    df.to_csv(out_path, index=False)
     print(f"\nSaved cleaned dataset to {out_path}")
+    print(f"Final shape: {df.shape}")

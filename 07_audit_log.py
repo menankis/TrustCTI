@@ -65,7 +65,10 @@ if __name__ == "__main__":
     decision_log.to_csv(AUDIT_CSV_PATH, index=False)
 
     # ---- Governance-level summary (what leadership/auditors care about) ----
-    latest_drift = drift[-1] if drift else None
+    # drift.json is now {"target_features": [...], "periods": [...]} instead
+    # of a plain list — handle both for compatibility with older reports.
+    drift_periods = drift.get("periods", drift) if isinstance(drift, dict) else drift
+    latest_drift = drift_periods[-1] if drift_periods else None
     needs_retrain = latest_drift and latest_drift["recall_malicious"] < RETRAIN_RECALL_THRESHOLD
 
     governance_record = {
@@ -77,7 +80,16 @@ if __name__ == "__main__":
             100 * (routed["routing_decision"] == "human_review").mean(), 1
         ),
         "adversarial_robustness_summary": {
-            "evasion_rate": adversarial["evasion_attack"]["evasion_rate"] if adversarial else None,
+            # adversarial_robustness_report.json now has
+            # "evasion_attack_by_intensity": [ {intensity, evasion_rate, ...}, ... ]
+            # instead of a single "evasion_attack" dict. Report the evasion
+            # rate at full intensity (attacker fully mimics benign averages)
+            # as the headline worst-case number.
+            "evasion_rate_at_full_intensity": (
+                adversarial["evasion_attack_by_intensity"][-1]["evasion_rate"]
+                if adversarial and "evasion_attack_by_intensity" in adversarial
+                else (adversarial["evasion_attack"]["evasion_rate"] if adversarial and "evasion_attack" in adversarial else None)
+            ),
             "recall_at_10pct_poisoning": next(
                 (r["recall_malicious"] for r in adversarial["poisoning_attack"]
                  if r["poison_fraction"] == 0.1), None
